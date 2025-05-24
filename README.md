@@ -26,3 +26,35 @@ CIWS/
 ├── CIWSControl.py       # Main system integrator and execution script
 └── README.md            # Project documentation
 
+## Cloning Repository and Requirements
+
+git clone https://github.com/FonzyShock/CIWS.git
+cd CIWS
+
+Requirements:
+- Python 3.x
+- OpenCV (for image processing tasks)
+- NumPy
+- Lidar sensor and associated Python libraries
+- Camera module compatible with OpenCV
+- Actuators (e.g., servos) and corresponding control libraries
+- RPi.GPIO or appropriate GPIO libraries for your platform
+
+
+## Program Execution
+
+In the command line
+python3 CIWSControl.py
+
+Ensure all hardware components (sensors, actuators, camera) are properly connected and configured before running the script.
+
+## Contributing:
+Contributions are welcome! Please fork the repository and submit a pull request with your enhancements or bug fixes.
+
+Contact:
+For any questions or suggestions, please contact the repository owner via GitHub.
+
+
+
+
+
