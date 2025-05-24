@@ -25,11 +25,15 @@ CIWS/
 ├── Sensors/             # Scripts for sensor data acquisition (e.g., camera input)
 ├── CIWSControl.py       # Main system integrator and execution script
 └── README.md            # Project documentation
+```
+---
 
 ## Cloning Repository and Requirements
 
+```plaintext
 git clone https://github.com/FonzyShock/CIWS.git
 cd CIWS
+```
 
 Requirements:
 - Python 3.x
@@ -44,14 +48,16 @@ Requirements:
 ## Program Execution
 
 In the command line
+```plaintext
 python3 CIWSControl.py
+```
 
 Ensure all hardware components (sensors, actuators, camera) are properly connected and configured before running the script.
 
 ## Contributing:
 Contributions are welcome! Please fork the repository and submit a pull request with your enhancements or bug fixes.
 
-Contact:
+## Contact:
 For any questions or suggestions, please contact the repository owner via GitHub.
 
 
