@@ -1,0 +1,45 @@
+# !/usr/bin/python3
+# LiDAR.py created by alfon at 5/29/2025
+
+# Enter feature description here
+
+# Python Libraries
+import time
+from smbus2 import SMBus
+
+# Python Functions
+# Define Functions Here
+
+
+# I2C parameters
+I2C_BUS      = 1       # /dev/i2c-1
+LIDAR_ADDR   = 0x62    # default address
+MEASURE_CMD  = 0x00    # register to write to trigger measurement
+MEASURE_VAL  = 0x04    # value to start an ACQ
+DIST_HIGH    = 0x0f    # high byte of distance
+DIST_LOW     = 0x10    # low byte of distance
+
+def read_distance(bus):
+    # 1) Trigger a measurement
+    bus.write_byte_data(LIDAR_ADDR, MEASURE_CMD, MEASURE_VAL)
+    # 2) Wait for acquisition (20 ms is usually enough)
+    time.sleep(0.02)
+    # 3) Read two bytes
+    high = bus.read_byte_data(LIDAR_ADDR, DIST_HIGH)
+    low  = bus.read_byte_data(LIDAR_ADDR, DIST_LOW)
+    # 4) Combine into a 16-bit value (mm)
+    return (high << 8) | low
+
+def main():
+    with SMBus(I2C_BUS) as bus:
+        print("LIDAR-Lite v3 distance readings:")
+        try:
+            while True:
+                dist_mm = read_distance(bus)
+                print(f"  → {dist_mm/1000:.3f} m")
+                time.sleep(0.1)
+        except KeyboardInterrupt:
+            print("\nDone.")
+
+if __name__ == "__main__":
+    main()
