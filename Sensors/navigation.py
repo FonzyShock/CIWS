@@ -12,6 +12,11 @@ Description:
     • Two‐motor differential drive via L298N (Blinka digitalio + pwmio)
     • Simple obstacle avoidance: drive forward, turn away
 
+Options:
+  1. Autonomous: perform continuous scans at user‑specified rate (1–100 Hz).
+  2. Manual: accept simple keyboard commands for driving.
+  3. Off: robot remains stationary.
+
 Usage:
     python3 navigation.py
 """
@@ -31,14 +36,14 @@ from digitalio import DigitalInOut, Direction
 from pwmio import PWMOut
 
 
-# ==== LidarSensor ====
+# LidarSensor
 class LidarSensor:
     """Auto‐detect RPLidar port and produce continuous 360° scans."""
-    TIMEOUT = 30  # seconds
+    TIMEOUT = 15  # seconds
 
     @staticmethod
     def find_port():
-        # Look for known CP210x adapter (VID=0x10C4, PID=0xEA60)
+        # Look for known CP210x adapter (VID=0x10C4, PID=0xEA60) if windows
         for port in serial.tools.list_ports.comports():
             if port.vid == 0x10C4 and port.pid == 0xEA60:
                 return port.device
@@ -62,16 +67,15 @@ class LidarSensor:
             print(f"LiDAR init error: {e}", file=sys.stderr)
             sys.exit(1)
 
-        # Start motor & begin continuous scanning
+        # Start motor & begin scans
         self.lidar.start_motor()
         self.scan_iter = self.lidar.iter_scans(max_buf_meas=360)
 
-        # Handle Ctrl+C for proper cleanup
+        # Handle Ctrl+C
         signal.signal(signal.SIGINT, self._cleanup)
 
     def next_scan(self):
         """
-        Read the next 360° measurement from the LiDAR.
         Returns: list of 360 distances (mm); zeros if no return.
         """
         distances = [0] * 360
@@ -94,13 +98,9 @@ class LidarSensor:
         sys.exit(0)
 
 
-# ==== MotorController ====
+# MotorController
 class MotorController:
-    """
-    Differential drive via L298N:
-      • Left motor:  IN1=D17, IN2=D27, PWM=D22
-      • Right motor: IN3=D10, IN4=D9,  PWM=D11
-    """
+    """ Differential drive via L298N """
     def __init__(self, freq=1000):
         # Direction pins
         self.in1 = DigitalInOut(board.D26); self.in1.direction = Direction.OUTPUT
@@ -113,6 +113,12 @@ class MotorController:
 
     def _set_speed(self, pwm: PWMOut, pct: float):
         pwm.duty_cycle = int((pct / 100.0) * 0xFFFF)
+
+    def backward(self, speed=50):
+        self.in1.value, self.in2.value = False, True
+        self.in3.value, self.in4.value = False, True
+        self._set_speed(self.pwmA, speed)
+        self._set_speed(self.pwmB, speed)
 
     def forward(self, speed=50):
         self.in1.value, self.in2.value = True, False
@@ -137,51 +143,80 @@ class MotorController:
         self.pwmB.duty_cycle = 0
 
 
-# ==== NavigationSystem ====
+#  NavigationSystem
 class NavigationSystem:
-    """
-    High‐level navigation: continuous obstacle avoidance
-    using LiDAR at a user‐configured rate.
-    """
-    def __init__(self, scan_hz=10):
-        print("Navigation System – Initialized.")
-        self.lidar = LidarSensor()
-        self.motor = MotorController()
-
-        # Obstacle threshold (mm)
-        self.obstacle_threshold = 500
-        # Front sector ±10°
-        self.front_sector = set(range(350, 360)) | set(range(0, 10))
-
-        # Scan rate configuration
-        self.scan_hz = scan_hz
-        self.scan_period = 1.0 / self.scan_hz
-        print(f"LiDAR scan rate set to {self.scan_hz} Hz "
-              f"({self.scan_period:.3f} s period)")
-
+    """Navigation with modes: autonomous, manual, off."""
+    def __init__(self):
         # Graceful shutdown on Ctrl+C
         signal.signal(signal.SIGINT, lambda *_: self.shutdown())
 
+        self.mode = self.select_mode()
+
+        if self.mode == 'autonomous':
+            #initialize LiDAR for use
+            self.lidar = LidarSensor()
+
+            # Scan rate configuration
+            while True:
+                try:
+                    rate = float(input("Enter LiDAR scan rate (1–100 Hz): "))
+                    if 1 <= rate <= 100:
+                        self.scan_hz = rate
+                        break
+                except ValueError:
+                    pass
+                print("Invalid input. Enter a number between 1 and 100.")
+            self.scan_period = 1.0 / self.scan_hz
+            print(f"Scan rate set to {self.scan_hz} Hz ({self.scan_period:.3f}s period)")
+
+            # Obstacle threshold (mm)
+            self.obstacle_threshold = 500
+            # Front sector ±15°
+            self.front_sector = set(range(345, 360)) | set(range(0, 15))
+
+            # enable motors for use
+            self.motor = MotorController()
+            print("Navigation System – Autonomous mode initialized.")
+            self.run_autonomous()
+        elif self.mode == 'manual':
+            self.motor = MotorController()
+            print("Navigation System – Manual mode Initialized.")
+            self.run_manual()
+        else:
+            print("Navigation is off - Sentry mode Initialized.")
+
+    @staticmethod
+    def select_mode():
+        print("Select navigation mode:")
+        print("  [A]utonomous")
+        print("  [M]anual")
+        print("  [O]ff")
+        while True:
+            choice = input("Enter A, M, or O: ").strip().lower()
+            if choice in ('a', 'm', 'o'):
+                return {'a': 'autonomous', 'm': 'manual', 'o': 'off'}[choice]
+            print("Invalid choice. Please enter A, M, or O.")
+
     def control_step(self):
         """Perform one scan and drive/avoid obstacles."""
-        distances = self.lidar.next_scan()
+        d = self.lidar.next_scan() # get distances to all surrounding objects
         # Find minimum distance in front sector
-        front = [distances[i] for i in self.front_sector if distances[i] > 0]
+        front = [d[i] for i in self.front_sector if d[i] > 0]
         min_front = min(front) if front else float('inf')
 
         if min_front > self.obstacle_threshold:
             self.motor.forward()
         else:
             # Compare left (60–120°) vs right (240–300°)
-            left  = [distances[i] for i in range(60, 120)  if distances[i] > 0]
-            right = [distances[i] for i in range(240, 300) if distances[i] > 0]
+            left  = [d[i] for i in range(60, 120) if d[i] > 0]
+            right = [d[i] for i in range(240, 300) if d[i] > 0]
             if min(left or [0]) > min(right or [0]):
                 self.motor.turn_left()
             else:
                 self.motor.turn_right()
 
-    def run(self):
-        print("Starting obstacle‐avoidance loop. Ctrl+C to exit.")
+    def run_autonomous(self):
+        print("\nStarting obstacle‐avoidance loop. Ctrl+C to exit.")
         while True:
             start = time.time()
             self.control_step()
@@ -190,12 +225,40 @@ class NavigationSystem:
             if elapsed < self.scan_period:
                 time.sleep(self.scan_period - elapsed)
 
+    def run_manual(self):
+        print("\nEntering manual mode.")
+        print("Use keys for chassis commands:")
+        print("  w=forward, s=backward, a=left, d=right, space=stop, q=quit")
+        while True:
+            raw = input("> ")
+            cmd = raw.strip().lower()
+            if raw == ' ':
+                self.motor.stop()
+                print("Stopped")
+            elif cmd == 'w':
+                self.motor.forward()
+                print("Moving forward")
+            elif cmd == 'a':
+                self.motor.turn_left()
+                print("Turning left")
+            elif cmd == 'd':
+                self.motor.turn_right()
+                print("Turning right")
+            elif cmd == 's':
+                self.motor.backward()
+                print("Moving backward")
+            elif cmd == 'q':
+                self.motor.stop()
+                print("Exiting manual mode.")
+                break
+            else:
+                print("Unknown. Use w/a/d/s/space/q.")
+
     def shutdown(self):
         """Stop motors & LiDAR, then exit."""
-        print("Shutting down: stopping motors and LiDAR.")
+        print("Shutting down...")
         self.motor.stop()
         try:
-
             self.lidar.lidar.stop()
             self.lidar.lidar.disconnect()
         except:
@@ -203,8 +266,7 @@ class NavigationSystem:
         sys.exit(0)
 
 
-# ==== Entry Point ====
 if __name__ == '__main__':
-    # You may pass a different scan rate like NavigationSystem(scan_hz=5)
-    nav = NavigationSystem(scan_hz=10)
-    nav.run()
+
+    nav = NavigationSystem()
+
