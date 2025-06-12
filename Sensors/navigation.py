@@ -102,6 +102,9 @@ class LidarSensor:
 
 
 # MotorController
+def set_speed(pwm: PWMOut, pct: float):
+    pwm.duty_cycle = int((pct / 100.0) * 0xFFFF)
+
 class MotorController:
     """ Differential drive via L298N """
     def __init__(self, freq=1000):
@@ -114,32 +117,54 @@ class MotorController:
         self.pwmA = PWMOut(board.D19, frequency=freq, duty_cycle=0)
         self.pwmB = PWMOut(board.D4, frequency=freq, duty_cycle=0)
 
-    def _set_speed(self, pwm: PWMOut, pct: float):
-        pwm.duty_cycle = int((pct / 100.0) * 0xFFFF)
+        while True:
+            try:
+                self.forward_speed = float(input("Enter forward speed (25-100%): "))
+                if 25 <= self.forward_speed <= 100:
+                    break
+            except ValueError:
+                pass
+            print("Invalid input. Enter a number between 25 and 100.")
+        while True:
+            try:
+                self.turn_speed = float(input("Enter turn speed (25-100%): "))
+                if 25 <= self.turn_speed <= 100:
+                    break
+            except ValueError:
+                pass
+            print("Invalid input. Enter a number between 0 and 100.")
+        while True:
+            try:
+                self.backward_speed = float(input("Enter reverse speed (25-100%): "))
+                if 25 <= self.turn_speed <= 100:
+                    break
+            except ValueError:
+                pass
+            print("Invalid input. Enter a number between 0 and 100.")
 
-    def backward(self, speed=50):
+    def backward(self):
         self.in1.value, self.in2.value = False, True
         self.in3.value, self.in4.value = False, True
-        self._set_speed(self.pwmA, speed)
-        self._set_speed(self.pwmB, speed)
+        set_speed(self.pwmA, self.backward_speed)
+        set_speed(self.pwmB, self.backward_speed)
 
-    def forward(self, speed=50):
+    def forward(self):
         self.in1.value, self.in2.value = True, False
         self.in3.value, self.in4.value = True, False
-        self._set_speed(self.pwmA, speed)
-        self._set_speed(self.pwmB, speed)
+        set_speed(self.pwmA, self.forward_speed)
+        set_speed(self.pwmB, self.forward_speed)
 
-    def turn_left(self, speed=50):
+    def turn_left(self):
         self.in1.value, self.in2.value = False, True
         self.in3.value, self.in4.value = True, False
-        self._set_speed(self.pwmA, speed)
-        self._set_speed(self.pwmB, speed)
+        set_speed(self.pwmA, self.turn_speed)
+        set_speed(self.pwmB, self.turn_speed)
 
-    def turn_right(self, speed=50):
+    def turn_right(self):
         self.in1.value, self.in2.value = True, False
         self.in3.value, self.in4.value = False, True
-        self._set_speed(self.pwmA, speed)
-        self._set_speed(self.pwmB, speed)
+        set_speed(self.pwmA, self.turn_speed)
+        set_speed(self.pwmB, self.turn_speed)
 
     def stop(self):
         self.pwmA.duty_cycle = 0
@@ -269,6 +294,5 @@ class NavigationSystem:
 
 
 if __name__ == '__main__':
-
     nav = NavigationSystem()
 
