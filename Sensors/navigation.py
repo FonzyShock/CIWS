@@ -25,6 +25,9 @@ import sys
 import signal
 import time
 from math import floor
+import termios
+import tty
+import select
 
 # RPLidar
 from adafruit_rplidar import RPLidar
@@ -126,13 +129,13 @@ class MotorController:
         self._set_speed(self.pwmA, speed)
         self._set_speed(self.pwmB, speed)
 
-    def turn_left(self, speed=75):
+    def turn_left(self, speed=50):
         self.in1.value, self.in2.value = False, True
         self.in3.value, self.in4.value = True, False
         self._set_speed(self.pwmA, speed)
         self._set_speed(self.pwmB, speed)
 
-    def turn_right(self, speed=75):
+    def turn_right(self, speed=50):
         self.in1.value, self.in2.value = True, False
         self.in3.value, self.in4.value = False, True
         self._set_speed(self.pwmA, speed)
@@ -167,7 +170,7 @@ class NavigationSystem:
                     pass
                 print("Invalid input. Enter a number between 1 and 100.")
             self.scan_period = 1.0 / self.scan_hz
-            print(f"Scan rate set to {self.scan_hz} Hz ({self.scan_period:.3f}s period)")
+            print(f"Scan rate set to {self.scan_hz} Hz")
 
             # Obstacle threshold (mm)
             self.obstacle_threshold = 500
@@ -180,6 +183,8 @@ class NavigationSystem:
             self.run_autonomous()
         elif self.mode == 'manual':
             self.motor = MotorController()
+            self.old_settings = termios.tcgetattr(sys.stdin)
+            tty.setcbreak(sys.stdin.fileno())
             print("Navigation System – Manual mode Initialized.")
             self.run_manual()
         else:
@@ -227,32 +232,29 @@ class NavigationSystem:
 
     def run_manual(self):
         print("\nEntering manual mode.")
-        print("Use keys for chassis commands:")
-        print("  w=forward, s=backward, a=left, d=right, space=stop, q=quit")
-        while True:
-            raw = input("> ")
-            cmd = raw.strip().lower()
-            if raw == ' ':
-                self.motor.stop()
-                print("Stopped")
-            elif cmd == 'w':
-                self.motor.forward()
-                print("Moving forward")
-            elif cmd == 'a':
-                self.motor.turn_left()
-                print("Turning left")
-            elif cmd == 'd':
-                self.motor.turn_right()
-                print("Turning right")
-            elif cmd == 's':
-                self.motor.backward()
-                print("Moving backward")
-            elif cmd == 'q':
-                self.motor.stop()
-                print("Exiting manual mode.")
-                break
-            else:
-                print("Unknown. Use w/a/d/s/space/q.")
+        print("Press keys to drive:")
+        print("  w=forward, s=backward, a=left, d=right, q=quit")
+        try:
+            while True:
+                ch = None
+                if select.select([sys.stdin], [], [], 0.1)[0]:
+                    ch = sys.stdin.read(1)
+                if ch == 'w':
+                    self.motor.forward()
+                elif ch == 'a':
+                    self.motor.turn_left()
+                elif ch == 'd':
+                    self.motor.turn_right()
+                elif ch == 's':
+                    self.motor.backward()
+                elif ch == 'q':
+                    break
+                else:
+                    self.motor.stop()
+        finally:
+            termios.tcsetattr(sys.stdin, termios.TCSADRAIN, self.old_settings)
+            self.motor.stop()
+            print("Exiting manual mode.")
 
     def shutdown(self):
         """Stop motors & LiDAR, then exit."""
