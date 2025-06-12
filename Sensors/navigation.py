@@ -24,6 +24,7 @@ Usage:
 import sys
 import signal
 import time
+import threading
 from math import floor
 import termios
 import tty
@@ -132,7 +133,7 @@ class MotorController:
                     break
             except ValueError:
                 pass
-            print("Invalid input. Enter a number between 0 and 100.")
+            print("Invalid input. Enter a number between 25 and 100.")
         while True:
             try:
                 self.backward_speed = float(input("Enter reverse speed (25-100%): "))
@@ -140,7 +141,7 @@ class MotorController:
                     break
             except ValueError:
                 pass
-            print("Invalid input. Enter a number between 0 and 100.")
+            print("Invalid input. Enter a number between 25 and 100.")
 
     def backward(self):
         self.in1.value, self.in2.value = False, True
@@ -181,8 +182,9 @@ class NavigationSystem:
         self.mode = self.select_mode()
 
         if self.mode == 'autonomous':
-            #initialize LiDAR for use
+            #initialize LiDAR and motor controller
             self.lidar = LidarSensor()
+            self.motor = MotorController()
 
             # Scan rate configuration
             while True:
@@ -197,15 +199,46 @@ class NavigationSystem:
             self.scan_period = 1.0 / self.scan_hz
             print(f"Scan rate set to {self.scan_hz} Hz")
 
-            # Obstacle threshold (mm)
-            self.obstacle_threshold = 500
+            '''Obstacle thresholds for turning and reverse motion'''
+            while True:
+                try:
+                    turn_threshold = float(input("Enter minimum obstacle turn distance (mm): "))
+                    if 100 <= turn_threshold <= 1000:
+                        self.turn_threshold = turn_threshold
+                        break
+                    else:
+                        print("Invalid input. Enter a number between 100 and 1000 mm.")
+                except ValueError:
+                    print("Invalid input. Please enter a valid number.")
+            print(f"Turn threshold set to {self.turn_threshold} mm")
+
+            while True:
+                try:
+                    reverse_threshold = float(input("Enter minimum obstacle reverse distance (mm): "))
+                    if  reverse_threshold >= self.turn_threshold:
+                        print("Invalid input. Reverse threshold must be less than the turn threshold.")
+                    elif reverse_threshold > 100:
+                        print("Invalid input. Reverse threshold must be at less than 100 mm.")
+                    else:
+                        self.reverse_threshold = reverse_threshold
+                        break
+                except ValueError:
+                    pass
+                print("Invalid input. Enter a valid number.")
+            print(f"Reverse threshold set to {self.reverse_threshold} mm")
+
+            ''' Set the field-of-view'''
             # Front sector ±15°
             self.front_sector = set(range(345, 360)) | set(range(0, 15))
 
-            # enable motors for use
-            self.motor = MotorController()
+            # Start autonomous loop in background when used with vision system.
+            # self._stop_event = threading.Event()
+            # self._thread = threading.Thread(target=self._run_autonomous, daemon=True)
+            # self._thread.start()
             print("Navigation System – Autonomous mode initialized.")
-            self.run_autonomous()
+            print("\nStarting obstacle‐avoidance loop. Ctrl+C to exit.")
+            self._run_autonomous()
+
         elif self.mode == 'manual':
             self.motor = MotorController()
             self.old_settings = termios.tcgetattr(sys.stdin)
@@ -227,33 +260,53 @@ class NavigationSystem:
                 return {'a': 'autonomous', 'm': 'manual', 'o': 'off'}[choice]
             print("Invalid choice. Please enter A, M, or O.")
 
-    def control_step(self):
-        """Perform one scan and drive/avoid obstacles."""
-        d = self.lidar.next_scan() # get distances to all surrounding objects
-        # Find minimum distance in front sector
-        front = [d[i] for i in self.front_sector if d[i] > 0]
-        min_front = min(front) if front else float('inf')
+    def _run_autonomous(self):
+        """method is for internal use only (note leading underscore).
+        Cannot be used outside the Navigation system method. """
+        try:
+            while True:  # not self._stop_event.is_set():
+                start_time = time.time()
 
-        if min_front > self.obstacle_threshold:
-            self.motor.forward()
-        else:
-            # Compare left (60–120°) vs right (240–300°)
-            left  = [d[i] for i in range(60, 120) if d[i] > 0]
-            right = [d[i] for i in range(240, 300) if d[i] > 0]
-            if min(left or [0]) > min(right or [0]):
-                self.motor.turn_left()
-            else:
-                self.motor.turn_right()
+                # --- LiDAR Scan and Preprocessing ---
+                distances = self.lidar.next_scan()  # Full 360° LiDAR scan
+                front_distances = [distances[i] for i in self.front_sector if distances[i] > 0]
+                min_front = min(front_distances) if front_distances else float('inf')
 
-    def run_autonomous(self):
-        print("\nStarting obstacle‐avoidance loop. Ctrl+C to exit.")
-        while True:
-            start = time.time()
-            self.control_step()
-            # Throttle to desired scan rate
-            elapsed = time.time() - start
-            if elapsed < self.scan_period:
-                time.sleep(self.scan_period - elapsed)
+                # --- Obstacle Avoidance Logic ---
+                if min_front > self.turn_threshold:
+                    # Safe to drive forward
+                    self.motor.forward()
+                    print('No obstacles detected. Driving forward.')
+                elif min_front < self.reverse_threshold:
+                    # Too close to an obstacle; reverse
+                    self.motor.backward()
+                    print('Reversing...')
+                else:
+                    # Obstacle within caution zone; determine best turn direction
+                    left_distances = [distances[i] for i in range(60, 120) if distances[i] > 0]
+                    right_distances = [distances[i] for i in range(240, 300) if distances[i] > 0]
+
+                    min_left = min(left_distances) if left_distances else float('inf')
+                    min_right = min(right_distances) if right_distances else float('inf')
+
+                    if min_left < min_right:
+                        self.motor.turn_right()  # Obstacle closer on the left
+                        print('Turning right...')
+                    else:
+                        self.motor.turn_left()  # Obstacle closer on the right
+                        print('Turning left...')
+
+                # --- Loop Timing Control to Match Desired Scan Rate ---
+                elapsed_time = time.time() - start_time
+                sleep_time = self.scan_period - elapsed_time
+                if sleep_time > 0:
+                    time.sleep(sleep_time)
+
+        except KeyboardInterrupt:
+            # Graceful shutdown on manual interruption
+            pass
+        finally:
+            self.shutdown()
 
     def run_manual(self):
         print("\nEntering manual mode.")
