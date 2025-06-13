@@ -1,59 +1,137 @@
-# !/usr/bin/python3
-# trigger.py created by alfon at 5/23/2025
+#!/usr/bin/python3
+# trigger.py
 
 """
-Module: servo.py
-Subsystem: Actuation / Nerf Gun Firing
-
-Description:
-    Provides an interface for triggering a servo motor to fire a Nerf dart.
-    The TriggerSystem class encapsulates GPIO PWM logic and exposes a simple
-    .shoot() method that can be used by the robot control system.
-
-Usage:
-    from actuators.servo import TriggerSystem
-    Trigger = TriggerSystem()
-    Trigger.shoot()
+Terminal-based servo control for Nerf dart trigger and X/Z servos,
+using termios for single-key input (i/j/k/l = up/left/down/right,
+SPACE = fire, q = quit).
 """
-# Python Libraries
-# import RPi.GPIO as GPIO
-# import time
 
-# Python Functions
+import board
+import pwmio
+from adafruit_motor import servo
+import sys
+import termios
+import tty
+import select
+import time
+
+# --- Configuration ---
+SERVO_X_PIN    = board.D17   # X-axis servo
+SERVO_Z_PIN    = board.D18   # Z-axis servo
+SERVO_DART_PIN = board.D27   # dart-firing servo
+
+# Key mappings
+KEY_UP     = 'i'
+KEY_DOWN   = 'k'
+KEY_LEFT   = 'j'
+KEY_RIGHT  = 'l'
+KEY_FIRE   = ' '   # space
+KEY_QUIT   = 'q'
+
+# Dart angles (0–180°)
+DART_FIRE_ANGLE    = 180
+DART_RETRACT_ANGLE = 0
+
+# Movement step per keypress
+ANGLE_STEP = 5
 
 
-
-class TriggerControl:
-    def __init__(self):
-        """
-        Initializes the GPIO pin and PWM signal for the servo.
-        """
-        # Setup:
-        # self.SERVO_PIN = 18
-        # GPIO.setmode(GPIO.BCM)
-        # GPIO.setup(self.SERVO_PIN, GPIO.OUT)
-        # self.pwm = GPIO.PWM(self.SERVO_PIN, 50)  # 50 Hz
-        # self.pwm.start(0)
-        print("Trigger Control- Initialized.")
+class TriggerSystem:
+    """Encapsulates the dart-firing servo."""
+    def __init__(self, pin):
+        self._pwm = pwmio.PWMOut(pin, frequency=50)
+        self.servo = servo.Servo(self._pwm)
+        self.servo.angle = DART_RETRACT_ANGLE
+        print(f"[Trigger] initialized on {pin}")
 
     def shoot(self):
-        """
-        Activates the servo motor to fire the Nerf gun.
-        """
-        print("TriggerControl - Firing!")  # for debugging
+        print("[Trigger] firing!")
+        self.servo.angle = DART_FIRE_ANGLE
+        time.sleep(0.5)
+        self.servo.angle = DART_RETRACT_ANGLE
+        time.sleep(0.5)
+        print("[Trigger] cycle complete.")
 
-        # Example for a short pulse:
-        # self.pwm.ChangeDutyCycle(7.5)  # Move to fire position
-        # time.sleep(0.5)
-        # self.pwm.ChangeDutyCycle(2.5)  # Return to rest
-        # time.sleep(0.5)
+    def cleanup(self):
+        self._pwm.deinit()
+        print("[Trigger] cleaned up.")
 
-    @staticmethod
-    def cleanup():
-        """
-        Releases the GPIO resources.
-        """
-        print("TriggerControl- Cleanup.")
-        # self.pwm.stop()
-        # GPIO.cleanup()
 
+def clamp(x, lo=0, hi=180):
+    return max(lo, min(hi, x))
+
+
+def get_char(timeout=0.02):
+    """
+    Read a single character from stdin, nonblocking with timeout.
+    Returns '' if no key was pressed within timeout.
+    """
+    fd = sys.stdin.fileno()
+    old = termios.tcgetattr(fd)
+    try:
+        tty.setraw(fd)
+        rlist, _, _ = select.select([fd], [], [], timeout)
+        if rlist:
+            return sys.stdin.read(1)
+        return ''
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old)
+
+
+def main():
+    # Initialize servos
+    pwm_x = pwmio.PWMOut(SERVO_X_PIN, frequency=50)
+    pwm_z = pwmio.PWMOut(SERVO_Z_PIN, frequency=50)
+    servo_x = servo.Servo(pwm_x)
+    servo_z = servo.Servo(pwm_z)
+    trigger = TriggerSystem(SERVO_DART_PIN)
+
+    # Start centered
+    servo_x.angle = 90
+    servo_z.angle = 90
+    print("Controls: i=up, k=down, j=left, l=right, SPACE=fire, q=quit")
+
+    running = True
+    try:
+        while running:
+            ch = get_char()
+
+            if not ch:
+                continue
+
+            if ch == KEY_QUIT:
+                running = False
+
+            elif ch == KEY_UP:
+                servo_z.angle = clamp(servo_z.angle + ANGLE_STEP)
+                print(f"[Z] angle → {servo_z.angle}")
+
+            elif ch == KEY_DOWN:
+                servo_z.angle = clamp(servo_z.angle - ANGLE_STEP)
+                print(f"[Z] angle → {servo_z.angle}")
+
+            elif ch == KEY_LEFT:
+                servo_x.angle = clamp(servo_x.angle - ANGLE_STEP)
+                print(f"[X] angle → {servo_x.angle}")
+
+            elif ch == KEY_RIGHT:
+                servo_x.angle = clamp(servo_x.angle + ANGLE_STEP)
+                print(f"[X] angle → {servo_x.angle}")
+
+            elif ch == KEY_FIRE:
+                trigger.shoot()
+
+    except KeyboardInterrupt:
+        print("\nInterrupted by user.")
+
+    finally:
+        # Cleanup all hardware
+        pwm_x.deinit()
+        pwm_z.deinit()
+        trigger.cleanup()
+        print("Shutdown complete.")
+
+
+if __name__ == "__main__":
+    main()
