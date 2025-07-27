@@ -76,9 +76,9 @@ class PersonDetectorThread:
                             }
 
             if largest:
-                print(f"[Camera] Person at ({largest['center_x']}, {largest['center_y']})")
+                # print(f"[Camera] Person at ({largest['center_x']}, {largest['center_y']})")
                 with open(self.output_file, 'w') as f:
-                    json.dump(largest, f, indent=4)
+                    json.dump(largest, f, indent=4) # Used to share detection data
 
             cv2.imshow("Camera Feed", frame)
             if cv2.waitKey(1) & 0xFF == ord('q'):
