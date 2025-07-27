@@ -75,8 +75,7 @@ class LidarSensor:
         self.lidar.start_motor()
         self.scan_iter = self.lidar.iter_scans(max_buf_meas=360)
 
-        # Handle Ctrl+C
-        signal.signal(signal.SIGINT, self._cleanup)
+
 
     def next_scan(self):
         """
@@ -176,8 +175,8 @@ class MotorController:
 class NavigationSystem:
     """Navigation with modes: autonomous, manual, off."""
     def __init__(self):
-        # Graceful shutdown on Ctrl+C
-        signal.signal(signal.SIGINT, lambda *_: self.shutdown())
+        # # Graceful shutdown on Ctrl+C
+        # signal.signal(signal.SIGINT, lambda *_: self.shutdown())
 
         self.mode = self.select_mode()
 
@@ -347,5 +346,7 @@ class NavigationSystem:
 
 
 if __name__ == '__main__':
+    # # Handle Ctrl+C
+    # signal.signal(signal.SIGINT, nav._cleanup)
     nav = NavigationSystem()
 
