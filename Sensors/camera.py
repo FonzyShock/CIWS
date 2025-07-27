@@ -19,63 +19,239 @@ Usage:
     frame = cam.get_frame()
     targets = cam.detect_and_classify_targets(frame)
 """
-# Python Libraries
-# import cv2
+# person_detector.py
+import torch
+import cv2
+import numpy as np
+import pandas as pd
+from ultralytics import YOLO
+import multiprocessing
+import time
+from pathlib import Path # Still useful for model paths if needed
 
-# Python Functions
-# Define Functions Here
+# Import the receiver functions
+
+class PersonDetector:
+    def __init__(self, model_path="yolo11n.pt", camera_id=0):
+        """
+        Initializes the PersonDetector.
+
+        Args:
+            model_path (str): Path to the YOLO model file (e.g., "yolo11n.pt").
+            camera_id (int): The ID of the camera to use (e.g., 0 for default webcam).
+        """
+        self.model_path = model_path
+        self.camera_id = camera_id
+        self.model = None
+        self.cap = None
+        self.parent_conn = None
+        self.child_conn = None
+        self.receiver_proc = None
+        self.running = False
+        self.last_sent_detection_data = None # To avoid sending redundant data
+
+        # Define detection parameters
+        self.PERSON_CLASS_ID = 0 # For COCO dataset
+
+        # Define drawing parameters (can be made configurable if needed)
+        self.crosshair_size = 10
+        self.crosshair_color = (0, 255, 255) # Yellow for largest person
+        self.crosshair_thickness = 3
 
 
-class VisionSystem:
-    def __init__(self, frame_width=640, h_fov_deg=60):
-        """
-        Initializes the camera feed and any associated detection models.
-         Args: frame_width (int). width of camera frame in pixels
-               h_fov_deg (float). horizontal field of view of the camera in degrees
-        """
+    def _load_model(self):
+        """Loads the YOLO model."""
+        try:
+            self.model = YOLO(self.model_path)
+            print(f"[{self.__class__.__name__}] YOLO model '{self.model_path}' loaded successfully.")
+        except Exception as e:
+            print(f"[{self.__class__.__name__}] Error loading YOLO model: {e}")
+            print(f"[{self.__class__.__name__}] Please ensure '{self.model_path}' is in the correct directory or is a valid model name.")
+            self.model = None
+            raise RuntimeError(f"Failed to load YOLO model: {e}")
 
-        # Example for OpenCV camera:
-        # self.cap = cv2.VideoCapture(0)
-        self.frame_width = frame_width
-        self.h_fov = h_fov_deg
-        print(f"Vision System - Initialized with HFOV {self.h_fov}° and frame width {self.frame_width}px.")
+    def _open_camera(self):
+        """Opens the webcam."""
+        self.cap = cv2.VideoCapture(self.camera_id)
+        if not self.cap.isOpened():
+            print(f"[{self.__class__.__name__}] Error: Could not open webcam (ID: {self.camera_id}).")
+            print(f"[{self.__class__.__name__}] Please ensure your webcam is connected and not in use by another application.")
+            self.cap = None
+            raise RuntimeError(f"Failed to open camera ID: {self.camera_id}")
+        print(f"[{self.__class__.__name__}] Webcam (ID: {self.camera_id}) opened successfully.")
+        cv2.namedWindow("YOLO Live Feed", cv2.WINDOW_NORMAL) # Create window once
 
-    # TODO: Replace with OpenCV code
-    def get_frame(self):
+    def start(self):
         """
-        Captures a frame from the camera.
-        Returns: frame. An image (as a NumPy array or other) or None if not implemented
+        Starts the detection process: loads model, opens camera, and spawns the receiver process.
         """
-        # Example for OpenCV:
-        # ret, frame = self.cap.read()
-        # return frame if ret else None
+        if self.running:
+            print(f"[{self.__class__.__name__}] Detector is already running.")
+            return
 
-        return None  # Replace with camera feed logic
+        try:
+            self._load_model()
+            self._open_camera()
 
-    def get_targets(self, frame):
-        """
-        Detects and classifies targets from the input frame.
-        Args: frame. an image frame from the camera
-        Returns: list. each target is represented as
-                {
-                    "label": str – class of the detected object ("friendly" or "enemy"),
-                    "bbox": (x, y, w, h) – bounding box coordinates
-                }
-        """
-        # TODO: Plug in object detection logic (YOLO))
-        return [{
-            "label": "enemy",
-            "bbox": (100, 100, 50, 50)
-        }]
+            # Setup Multiprocessing Pipe
+            self.parent_conn, self.child_conn = multiprocessing.Pipe()
 
-    def get_relative_azimuth(self, bbox):
+            # Start the receiver process
+            self.receiver_proc = multiprocessing.Process(target=receiver_process, args=(self.child_conn,))
+            self.receiver_proc.start()
+            print(f"[{self.__class__.__name__}] Started receiver process with PID: {self.receiver_proc.pid}")
+
+            self.running = True
+            print(f"[{self.__class__.__name__}] Detector started. Press 'q' in the video window to stop.")
+
+        except RuntimeError as e:
+            print(f"[{self.__class__.__name__}] Initialization failed: {e}")
+            self.stop() # Ensure cleanup if start fails
+            return False
+        return True
+
+    def _process_frame(self, frame):
         """
-        Calculates the relative azimuth angle to the target in degrees based on its pixel position.
-        Args: bbox (tuple) - bounding box (x, y, w, h)
-        Returns: float. relative angle from center (left negative, right positive)
+        Internal method to perform detection on a single frame,
+        identify the largest person, and return its data.
         """
-        x, _, w, _ = bbox
-        target_center_x = x + w / 2
-        pixel_offset = target_center_x - (self.frame_width / 2)
-        angle_per_pixel = self.h_fov / self.frame_width
-        return pixel_offset * angle_per_pixel
+        results_generator = self.model(frame, stream=True, classes=self.PERSON_CLASS_ID)
+
+        largest_person_data = None
+        max_area = 0
+
+        annotated_frame = frame.copy() # Start with a copy of the frame to draw on
+
+        for r in results_generator:
+            # r.plot() returns the annotated frame, so we update it here
+            annotated_frame = r.plot()
+
+            if r.boxes: # Check if any bounding boxes (persons) were detected
+                boxes_xyxy = r.boxes.xyxy.cpu().numpy()
+                confidences = r.boxes.conf.cpu().numpy()
+                class_ids = r.boxes.cls.cpu().numpy()
+
+                for i, bbox in enumerate(boxes_xyxy):
+                    x1, y1, x2, y2 = bbox
+                    width = x2 - x1
+                    height = y2 - y1
+                    area = width * height
+
+                    if area > max_area:
+                        max_area = area
+                        # TODO::Have the center_x and center_y be the inputs to control the x and y actuators for CIWS control
+                        largest_person_data = {
+                            "center_x": int((x1 + x2) / 2),
+                            "center_y": int((y1 + y2) / 2),
+                            "width": int(width),
+                            "height": int(height),
+                            "confidence": float(confidences[i]),
+                            "class_id": int(class_ids[i]),
+                            "label": self.model.names[int(class_ids[i])]
+                        }
+        return annotated_frame, largest_person_data
+
+    def run(self):
+        """
+        The main loop for capturing frames, processing, and sending data.
+        This method will block until stopped.
+        """
+        if not self.running:
+            print(f"[{self.__class__.__name__}] Detector is not started. Call .start() first.")
+            return
+
+        while self.running:
+            ret, frame = self.cap.read()
+            if not ret:
+                print(f"[{self.__class__.__name__}] Error: Could not read frame. Stopping detector.")
+                self.stop()
+                break
+
+            annotated_frame, current_frame_largest_person = self._process_frame(frame)
+
+            # Highlight the largest person on the annotated frame
+            if current_frame_largest_person:
+                center_x_largest = current_frame_largest_person['center_x']
+                center_y_largest = current_frame_largest_person['center_y']
+
+                # Draw crosshair
+                cv2.line(annotated_frame, (center_x_largest - self.crosshair_size, center_y_largest),
+                         (center_x_largest + self.crosshair_size, center_y_largest),
+                         self.crosshair_color, self.crosshair_thickness)
+                cv2.line(annotated_frame, (center_x_largest, center_y_largest - self.crosshair_size),
+                         (center_x_largest, center_y_largest + self.crosshair_size),
+                         self.crosshair_color, self.crosshair_thickness)
+
+                # Add text for coordinates
+                cv2.putText(annotated_frame,
+                            f"Lg:({center_x_largest}, {center_y_largest})",
+                            (center_x_largest + self.crosshair_size + 5, center_y_largest - self.crosshair_size - 5),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, self.crosshair_color, 2, cv2.LINE_AA)
+
+                # Send data only if it has changed
+                if current_frame_largest_person != self.last_sent_detection_data:
+                    try:
+                        self.parent_conn.send(current_frame_largest_person)
+                        self.last_sent_detection_data = current_frame_largest_person
+                        # print(f"[{self.__class__.__name__}] Data sent: {current_frame_largest_person['center_x']}, {current_frame_largest_person['center_y']}")
+                    except Exception as e:
+                        print(f"[{self.__class__.__name__}] Error sending data through pipe: {e}")
+            else:
+                # If no persons detected, send a 'None' signal if the last frame had a detection
+                if self.last_sent_detection_data is not None:
+                    try:
+                        self.parent_conn.send(None)
+                        self.last_sent_detection_data = None
+                        # print(f"[{self.__class__.__name__}] Sent 'no detection' signal.")
+                    except Exception as e:
+                        print(f"[{self.__class__.__name__}] Error sending 'no detection' signal: {e}")
+
+            cv2.imshow("YOLO Live Feed", annotated_frame)
+
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                print(f"[{self.__class__.__name__}] 'q' pressed. Stopping detector.")
+                self.stop()
+                break
+
+    def stop(self):
+        """
+        Stops the detector, releases resources, and terminates the receiver process.
+        """
+        if not self.running:
+            print(f"[{self.__class__.__name__}] Detector is not running.")
+            return
+
+        print(f"[{self.__class__.__name__}] Stopping detector...")
+        self.running = False # Signal the run loop to stop
+
+        if self.cap:
+            self.cap.release()
+            self.cap = None
+        cv2.destroyAllWindows()
+
+        # Close pipe connections and terminate the child process
+        if self.parent_conn:
+            self.parent_conn.close()
+            self.parent_conn = None
+        if self.child_conn: # Ensure child_conn is closed even if parent didn't get to use it
+            self.child_conn.close()
+            self.child_conn = None
+        if self.receiver_proc and self.receiver_proc.is_alive():
+            self.receiver_proc.join(timeout=2) # Give it a moment to clean up
+            if self.receiver_proc.is_alive():
+                print(f"[{self.__class__.__name__}] Receiver process did not terminate gracefully, forcing termination.")
+                self.receiver_proc.terminate()
+            self.receiver_proc = None
+
+        print(f"[{self.__class__.__name__}] Detector stopped successfully.")
+
+# This block is crucial for multiprocessing on Windows
+if __name__ == "__main__":
+    multiprocessing.freeze_support() # Essential for Windows when creating executables
+
+    # --- Example Usage ---
+    detector = PersonDetector(model_path="yolov11n.pt", camera_id=0) # Use yolov8n.pt as it's common
+
+    if detector.start():
+        detector.run()
+    # No need for explicit detector.stop() here as .run() calls it upon exit
