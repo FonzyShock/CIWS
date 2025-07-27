@@ -1,21 +1,14 @@
 # !/usr/bin/python3
 # CIWS_Combined.py created by Desktop at 7/27/2025
 
-# Enter feature description here
-
+"""
+CIWS - Combined Script for Navigation, Vision, and Firing Control
+Controls:
+- Navigation using onboard LiDAR
+- Person detection using YOLOv11
+- Auto/manual servo aiming and firing when size threshold is met
+"""
 # Python Libraries
-# Import Libraries here
-
-# Python Functions
-# Define Functions Here
-#!/usr/bin/env python3
-# ciws_combined.py
-
-"""
-CIWS - Combined Script for Navigation and Person Detection
-Runs both subsystems in parallel threads.
-"""
-
 import threading
 import time
 import signal
@@ -23,14 +16,19 @@ import sys
 import cv2
 import json
 import os
+
+# Runtime Environment Setup
 os.environ["DISPLAY"] = ":0" # Forces the camera view to always open on local screen
 
+# Subsystems
 from Sensors.navigation import NavigationSystem
+from Actuators.TriggerControl import TriggerControl
 
 
-# Turn off logs
+
+# YOLO Config
 import ultralytics
-ultralytics.settings.verbose = False
+ultralytics.settings.verbose = False # turn off the log printout
 from ultralytics import YOLO
 
 # === Person Detection System ===
@@ -80,7 +78,8 @@ class PersonDetectorThread:
                 with open(self.output_file, 'w') as f:
                     json.dump(largest, f, indent=4) # Used to share detection data
 
-            cv2.imshow("Camera Feed", frame)
+            frame_resized = cv2.resize(frame, (800, 600))
+            cv2.imshow("Camera Feed", frame_resized)
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 self.running = False
 
@@ -100,15 +99,52 @@ class CIWSControl:
         self.detector = PersonDetectorThread()
         self.navigation_thread = threading.Thread(target=self.start_navigation, daemon=True)
         self.detector_thread = threading.Thread(target=self.detector.run, daemon=True)
+        self.aim_thread = threading.Thread(target=self.aim_from_detection, daemon=True)
+        self.trigger = TriggerControl(mode="auto")  # or "manual"
+
         self.running = True
 
     def start_navigation(self):
         self.navigation = NavigationSystem()
 
+    def aim_from_detection(self):
+        """Reads detection data and uses it to control turret aim."""
+        print("[CIWS] Aiming thread started.")
+        FIRE_AREA_THRESHOLD = 100_000  # Tune this value (e.g., 320x320 area)
+        COOLDOWN_SECONDS = 3 # Cooldown period between shots
+        last_shot_time = 0
+
+        while self.running:
+            try:
+                if os.path.exists(self.detector.output_file):
+                    with open(self.detector.output_file, 'r') as f:
+                        data = json.load(f)
+                        if data and isinstance(data, dict):
+                            cx = data.get("center_x")
+                            cy = data.get("center_y")
+                            width = data.get("width")
+                            height = data.get("height")
+
+                            if cx is not None and cy is not None:
+                                self.trigger.aim(cx, cy)
+
+                            if width and height:
+                                area = width * height
+                                now = time.time()
+                                if area >= FIRE_AREA_THRESHOLD and now - last_shot_time >= COOLDOWN_SECONDS:
+                                    print(f"[CIWS] Firing at target (area={area}).")
+                                    self.trigger.shoot()
+                                    last_shot_time = now
+
+            except Exception as e:
+                print(f"[CIWS] Aim error: {e}")
+            time.sleep(0.05)  # Fast enough for responsiveness but not CPU intensive
+
     def run(self):
         print("[CIWS] Launching subsystems...")
         self.navigation_thread.start()
         self.detector_thread.start()
+        self.aim_thread.start()
 
         try:
             while self.running:
@@ -120,6 +156,12 @@ class CIWSControl:
         print("[CIWS] Shutting down...")
         self.running = False
         self.detector.stop()
+        try:
+            self.trigger.cleanup()
+        except Exception:
+            pass
+
+        print("[CIWS] All systems shutdown.")
         sys.exit(0)
 
 
@@ -127,4 +169,6 @@ if __name__ == "__main__":
     controller = CIWSControl()
     signal.signal(signal.SIGINT, lambda *_: controller.stop())
     controller.run()
+
+
 
