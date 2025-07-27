@@ -22,12 +22,16 @@ import signal
 import sys
 import cv2
 import json
+import os
+os.environ["DISPLAY"] = ":0" # Forces the camera view to always open on local screen
 
 from Sensors.navigation import NavigationSystem
-from ultralytics import YOLO
+
 
 # Turn off logs
+import ultralytics
 ultralytics.settings.verbose = False
+from ultralytics import YOLO
 
 # === Person Detection System ===
 class PersonDetectorThread:
