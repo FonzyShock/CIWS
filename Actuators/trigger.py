@@ -19,7 +19,7 @@ import time
 # --- Configuration ---
 SERVO_X_PIN    = board.D17   # X-axis servo
 SERVO_Z_PIN    = board.D18   # Z-axis servo
-SERVO_DART_PIN = board.D27   # dart-firing servo
+SERVO_DART_PIN = board.D24   # dart-firing servo
 
 # Key mappings
 KEY_UP     = 'i'
@@ -34,7 +34,7 @@ DART_FIRE_ANGLE    = 180
 DART_RETRACT_ANGLE = 0
 
 # Movement step per keypress
-ANGLE_STEP = 5
+ANGLE_STEP = 2
 
 
 class TriggerSystem:
@@ -48,7 +48,7 @@ class TriggerSystem:
     def shoot(self):
         print("[Trigger] firing!")
         self.servo.angle = DART_FIRE_ANGLE
-        time.sleep(0.5)
+        time.sleep(2)
         self.servo.angle = DART_RETRACT_ANGLE
         time.sleep(0.5)
         print("[Trigger] cycle complete.")
@@ -62,7 +62,7 @@ def clamp(x, lo=0, hi=180):
     return max(lo, min(hi, x))
 
 
-def get_char(timeout=0.02):
+def get_char(timeout=0.1):
     """
     Read a single character from stdin, nonblocking with timeout.
     Returns '' if no key was pressed within timeout.
@@ -81,8 +81,10 @@ def get_char(timeout=0.02):
 
 def main():
     # Initialize servos
-    pwm_x = pwmio.PWMOut(SERVO_X_PIN, frequency=50)
-    pwm_z = pwmio.PWMOut(SERVO_Z_PIN, frequency=50)
+    print("Servo test started. Waiting for input...")
+
+    pwm_x = pwmio.PWMOut(SERVO_X_PIN, frequency=100)
+    pwm_z = pwmio.PWMOut(SERVO_Z_PIN, frequency=100)
     servo_x = servo.Servo(pwm_x)
     servo_z = servo.Servo(pwm_z)
     trigger = TriggerSystem(SERVO_DART_PIN)
@@ -98,6 +100,7 @@ def main():
             ch = get_char()
 
             if not ch:
+                time.sleep(0.05)
                 continue
 
             if ch == KEY_QUIT:
@@ -121,6 +124,7 @@ def main():
 
             elif ch == KEY_FIRE:
                 trigger.shoot()
+            time.sleep(0.05)  # Prevents 100% CPU usage during idle
 
     except KeyboardInterrupt:
         print("\nInterrupted by user.")
