@@ -100,7 +100,7 @@ class CIWSControl:
         self.navigation_thread = threading.Thread(target=self.start_navigation, daemon=True)
         self.detector_thread = threading.Thread(target=self.detector.run, daemon=True)
         self.aim_thread = threading.Thread(target=self.aim_from_detection, daemon=True)
-        self.trigger = TriggerControl(mode="auto")  # or "manual"
+        self.trigger = TriggerControl()  # or "manual"
 
         self.running = True
 
