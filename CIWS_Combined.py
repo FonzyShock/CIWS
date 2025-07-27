@@ -23,8 +23,11 @@ import sys
 import cv2
 import json
 
-from navigation import NavigationSystem
+from Sensors.navigation import NavigationSystem
 from ultralytics import YOLO
+
+# Turn off logs
+ultralytics.settings.verbose = False
 
 # === Person Detection System ===
 class PersonDetectorThread:
@@ -46,7 +49,7 @@ class PersonDetectorThread:
                 print("Frame grab failed.")
                 break
 
-            results = self.model(frame, stream=True, classes=self.PERSON_CLASS_ID)
+            results = self.model(frame, stream=True, classes=self.PERSON_CLASS_ID, verbose =False)
             largest = None
             max_area = 0
 

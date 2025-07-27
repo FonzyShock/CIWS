@@ -29,6 +29,9 @@ import multiprocessing
 import time
 from pathlib import Path # Still useful for model paths if needed
 
+# Turn off logs
+ultralytics.settings.verbose = False
+
 # Import the receiver functions
 
 class PersonDetector:
@@ -115,7 +118,7 @@ class PersonDetector:
         Internal method to perform detection on a single frame,
         identify the largest person, and return its data.
         """
-        results_generator = self.model(frame, stream=True, classes=self.PERSON_CLASS_ID)
+        results_generator = self.model(frame, stream=True, classes=self.PERSON_CLASS_ID, verbose=False)
 
         largest_person_data = None
         max_area = 0
