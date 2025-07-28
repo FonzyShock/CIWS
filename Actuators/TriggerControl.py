@@ -70,6 +70,15 @@ class TriggerControl:
             self.servo_z.angle = self.angle_z
             print(f"[Trigger] Auto-aiming to X={self.angle_x}, Z={self.angle_z}")
 
+    def center(self):
+        """Reset turret servos to center (90° for X and Z)."""
+        with self._lock:
+            self.angle_x = 90
+            self.angle_z = 90
+            self.servo_x.angle = self.angle_x
+            self.servo_z.angle = self.angle_z
+            print("[Trigger] Servos reset to center.")
+
     def shoot_auto(self):
         print("[Trigger] Auto Firing!")
         with self._lock:

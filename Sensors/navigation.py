@@ -61,15 +61,14 @@ class LidarSensor:
         try:
             self.port = self.find_port()
         except RuntimeError as e:
-            print(f"LiDAR error: {e}", file=sys.stderr)
-            sys.exit(1)
+            raise RuntimeError(f"LiDAR error: {e}")
+
         print(f"RPLidar detected on {self.port}")
 
         try:
             self.lidar = RPLidar(None, self.port, timeout=self.TIMEOUT)
         except Exception as e:
-            print(f"LiDAR init error: {e}", file=sys.stderr)
-            sys.exit(1)
+            raise RuntimeError(f"LiDAR init error: {e}")
 
         # Start motor & begin scans
         self.lidar.start_motor()
@@ -98,7 +97,7 @@ class LidarSensor:
             self.lidar.disconnect()
         except:
             pass
-        sys.exit(0)
+
 
 
 # MotorController
@@ -136,7 +135,7 @@ class MotorController:
         while True:
             try:
                 self.backward_speed = float(input("Enter reverse speed (25-100%): "))
-                if 25 <= self.turn_speed <= 100:
+                if 25 <= self.backward_speed <= 100:
                     break
             except ValueError:
                 pass
@@ -182,21 +181,34 @@ class NavigationSystem:
 
         if self.mode == 'autonomous':
             #initialize LiDAR and motor controller
-            self.lidar = LidarSensor()
-            self.motor = MotorController()
+            try:
+                self.lidar = LidarSensor()
+                self.motor = MotorController()
+            except Exception as e:
+                print(f"[WARNING] Failed to initialize LiDAR in autonomous mode: {e}")
+                print("[INFO] Switching to sentry mode (Off)...")
+                self.mode = 'off'
+                print("Navigation is off - Sentry mode Initialized.")
+                return
+
 
             # Scan rate configuration
-            while True:
-                try:
-                    rate = float(input("Enter LiDAR scan rate (1–100 Hz): "))
-                    if 1 <= rate <= 100:
-                        self.scan_hz = rate
-                        break
-                except ValueError:
-                    pass
-                print("Invalid input. Enter a number between 1 and 100.")
+            self.scan_hz = 10  # Fixed scan rate
             self.scan_period = 1.0 / self.scan_hz
-            print(f"Scan rate set to {self.scan_hz} Hz")
+            print(f"Scan rate fixed at {self.scan_hz} Hz")
+
+            '''User-defined Lidar scan rate via keyboard input'''
+            # while True:
+            #     try:
+            #         rate = float(input("Enter LiDAR scan rate (1–100 Hz): "))
+            #         if 1 <= rate <= 100:
+            #             self.scan_hz = rate
+            #             break
+            #     except ValueError:
+            #         pass
+            #     print("Invalid input. Enter a number between 1 and 100.")
+            # self.scan_period = 1.0 / self.scan_hz
+            # print(f"Scan rate set to {self.scan_hz} Hz")
 
             '''Obstacle thresholds for turning and reverse motion'''
             while True:
@@ -308,7 +320,7 @@ class NavigationSystem:
     def handle_key(self, key):
         if self.mode != 'manual' or self.motor is None:
             return
-
+        print(f"[Keyboard] Navigation key: {repr(key)}")  # Debug: confirm dispatcher input
         if key == 'w':
             self.motor.forward()
         elif key == 'a':
@@ -322,15 +334,15 @@ class NavigationSystem:
 
     def shutdown(self):
         """Stop motors & LiDAR, then exit."""
-        print("Shutting down...")
-        self.motor.stop()
+        print("Shutting down motor controller...")
+        if self.motor:
+            self.motor.stop()
         try:
             self.lidar.lidar.stop()
             self.lidar.lidar.disconnect()
         except:
             pass
         sys.exit(0)
-
 
 if __name__ == '__main__':
     nav = NavigationSystem()

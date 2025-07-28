@@ -81,6 +81,10 @@ class PersonDetectorThread:
                 # print(f"[Camera] Person at ({largest['center_x']}, {largest['center_y']})")
                 with open(self.output_file, 'w') as f:
                     json.dump(largest, f, indent=4) # Used to share detection data
+            else:
+                # Overwrite with an empty object if no detection
+                with open(self.output_file, 'w') as f:
+                    json.dump({}, f)
 
             #frame_resized = cv2.resize(frame, (800, 600))
             cv2.imshow("Camera Feed", frame)
@@ -127,9 +131,10 @@ class CIWSControl:
         """Reads detection data and uses it to control turret aim."""
         self.trigger_ready.wait()  # Wait until trigger is initialized
         print("[CIWS] Aiming thread started.")
-        FIRE_AREA_THRESHOLD = 100_000  # Tune this value (e.g., 320x320 area)
-        COOLDOWN_SECONDS = 3 # Cooldown period between shots
+        FIRE_AREA_THRESHOLD = 100_000  # Tune this value
+        COOLDOWN_SECONDS = 3
         last_shot_time = 0
+        target_visible = False  # Track whether a target was last seen
 
         while self.running:
             try:
@@ -139,7 +144,8 @@ class CIWSControl:
                             data = json.load(f)
                         except json.JSONDecodeError:
                             data = None
-                        if data and isinstance(data, dict):
+
+                        if data and isinstance(data, dict) and data.get("center_x") is not None:
                             cx = data.get("center_x")
                             cy = data.get("center_y")
                             width = data.get("width")
@@ -147,6 +153,12 @@ class CIWSControl:
 
                             if cx is not None and cy is not None:
                                 self.trigger.aim(cx, cy)
+                                target_visible = True  # Target is present
+                            else:
+                                if target_visible:
+                                    print("[CIWS] No target detected. Resetting aim to center.")
+                                    self.trigger.center()
+                                    target_visible = False
 
                             if width and height:
                                 area = width * height
@@ -156,11 +168,21 @@ class CIWSControl:
                                         print(f"[CIWS] Auto-firing at target (area={area}).")
                                         self.trigger.shoot_auto()
                                         last_shot_time = now
-
+                        else:
+                            if target_visible:
+                                print("[CIWS] No target detected. Resetting aim to center.")
+                                self.trigger.center()
+                                target_visible = False
+                else:
+                    if target_visible:
+                        print("[CIWS] No target detected. Resetting aim to center.")
+                        self.trigger.center()
+                        target_visible = False
 
             except Exception as e:
                 print(f"[CIWS] Aim error: {e}")
-            time.sleep(0.05)  # Fast enough for responsiveness but not CPU intensive
+
+            time.sleep(0.05)
 
     def run(self):
         print("[CIWS] Launching subsystems...")
