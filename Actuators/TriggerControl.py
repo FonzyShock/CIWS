@@ -94,7 +94,7 @@ class TriggerControl:
             print("[Trigger] Trigger reset.")
 
     def _manual_control(self):
-        print("Manual controls: i=up, k=down, j=left, l=right, enter=fire, q=quit")
+        print("Manual controls: i=up, k=down, j=left, l=right, space=fire, q=quit")
         try:
             while self.running:
                 ch = get_char()
@@ -116,7 +116,7 @@ class TriggerControl:
                 self.angle_x = clamp(self.angle_x - ANGLE_STEP)
             elif key == 'l':
                 self.angle_x = clamp(self.angle_x + ANGLE_STEP)
-            elif key == '\r':
+            elif key == ' ':
                 self.shoot()
             elif key == 'q':
                 self.running = False

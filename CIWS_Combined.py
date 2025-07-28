@@ -146,9 +146,11 @@ class CIWSControl:
                                 area = width * height
                                 now = time.time()
                                 if area >= FIRE_AREA_THRESHOLD and now - last_shot_time >= COOLDOWN_SECONDS:
-                                    print(f"[CIWS] Firing at target (area={area}).")
-                                    self.trigger.shoot()
-                                    last_shot_time = now
+                                    if getattr(self.trigger, 'mode', 'auto') == 'auto':
+                                        print(f"[CIWS] Auto-firing at target (area={area}).")
+                                        self.trigger.shoot()
+                                        last_shot_time = now
+
 
             except Exception as e:
                 print(f"[CIWS] Aim error: {e}")
