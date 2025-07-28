@@ -43,7 +43,7 @@ from pwmio import PWMOut
 # LidarSensor
 class LidarSensor:
     """Auto‐detect RPLidar port and produce continuous 360° scans."""
-    TIMEOUT = 15  # seconds
+    TIMEOUT = 30  # seconds
 
     @staticmethod
     def find_port():
@@ -230,20 +230,18 @@ class NavigationSystem:
             # Front sector ±15°
             self.front_sector = set(range(345, 360)) | set(range(0, 15))
 
-            # Start autonomous loop in background when used with vision system.
-            # self._stop_event = threading.Event()
-            # self._thread = threading.Thread(target=self._run_autonomous, daemon=True)
-            # self._thread.start()
             print("Navigation System – Autonomous mode initialized.")
             print("\nStarting obstacle‐avoidance loop. Ctrl+C to exit.")
-            self._run_autonomous()
+            self._autonomous_thread = threading.Thread(target=self._run_autonomous, daemon=True)
+            self._autonomous_thread.start()
 
         elif self.mode == 'manual':
             self.motor = MotorController()
-            self.old_settings = termios.tcgetattr(sys.stdin)
-            tty.setcbreak(sys.stdin.fileno())
+           # self.old_settings = termios.tcgetattr(sys.stdin)
+           # tty.setcbreak(sys.stdin.fileno())
             print("Navigation System – Manual mode Initialized.")
-            self.run_manual()
+            #self._manual_thread = threading.Thread(target=self.run_manual, daemon=True)
+            #self._manual_thread.start()
         else:
             print("Navigation is off - Sentry mode Initialized.")
 
@@ -307,31 +305,45 @@ class NavigationSystem:
         finally:
             self.shutdown()
 
-    def run_manual(self):
-        print("\nEntering manual mode.")
-        print("Press keys to drive:")
-        print("  w=forward, s=backward, a=left, d=right, q=quit")
-        try:
-            while True:
-                ch = None
-                if select.select([sys.stdin], [], [], 0.1)[0]:
-                    ch = sys.stdin.read(1)
-                if ch == 'w':
-                    self.motor.forward()
-                elif ch == 'a':
-                    self.motor.turn_left()
-                elif ch == 'd':
-                    self.motor.turn_right()
-                elif ch == 's':
-                    self.motor.backward()
-                elif ch == 'q':
-                    break
-                else:
-                    self.motor.stop()
-        finally:
-            termios.tcsetattr(sys.stdin, termios.TCSADRAIN, self.old_settings)
+    def handle_key(self, key):
+        if self.mode != 'manual' or self.motor is None:
+            return
+
+        if key == 'w':
+            self.motor.forward()
+        elif key == 'a':
+            self.motor.turn_left()
+        elif key == 'd':
+            self.motor.turn_right()
+        elif key == 's':
+            self.motor.backward()
+        else:
             self.motor.stop()
-            print("Exiting manual mode.")
+    # def run_manual(self):
+    #     print("\nEntering manual mode.")
+    #     print("Press keys to drive:")
+    #     print("  w=forward, s=backward, a=left, d=right, q=quit")
+    #     try:
+    #         while True:
+    #             ch = None
+    #             if select.select([sys.stdin], [], [], 0.1)[0]:
+    #                 ch = sys.stdin.read(1)
+    #             if ch == 'w':
+    #                 self.motor.forward()
+    #             elif ch == 'a':
+    #                 self.motor.turn_left()
+    #             elif ch == 'd':
+    #                 self.motor.turn_right()
+    #             elif ch == 's':
+    #                 self.motor.backward()
+    #             elif ch == 'q':
+    #                 break
+    #             else:
+    #                 self.motor.stop()
+    #     finally:
+    #         termios.tcsetattr(sys.stdin, termios.TCSADRAIN, self.old_settings)
+    #         self.motor.stop()
+    #         print("Exiting manual mode.")
 
     def shutdown(self):
         """Stop motors & LiDAR, then exit."""
@@ -346,7 +358,5 @@ class NavigationSystem:
 
 
 if __name__ == '__main__':
-    # # Handle Ctrl+C
-    # signal.signal(signal.SIGINT, nav._cleanup)
     nav = NavigationSystem()
 

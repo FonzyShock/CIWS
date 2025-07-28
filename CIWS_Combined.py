@@ -23,6 +23,7 @@ os.environ["DISPLAY"] = ":0" # Forces the camera view to always open on local sc
 # Subsystems
 from Sensors.navigation import NavigationSystem
 from Actuators.TriggerControl import TriggerControl
+from KeyboardDispatcher import KeyboardDispatcher
 
 
 
@@ -45,6 +46,9 @@ class PersonDetectorThread:
 
     def run(self):
         print("[Camera] Detection thread started.")
+        cv2.namedWindow("Camera Feed", cv2.WINDOW_NORMAL)
+        cv2.setWindowProperty("Camera Feed", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+
         while self.running:
             ret, frame = self.cap.read()
             if not ret:
@@ -78,8 +82,8 @@ class PersonDetectorThread:
                 with open(self.output_file, 'w') as f:
                     json.dump(largest, f, indent=4) # Used to share detection data
 
-            frame_resized = cv2.resize(frame, (800, 600))
-            cv2.imshow("Camera Feed", frame_resized)
+            #frame_resized = cv2.resize(frame, (800, 600))
+            cv2.imshow("Camera Feed", frame)
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 self.running = False
 
@@ -100,15 +104,25 @@ class CIWSControl:
         self.navigation_thread = threading.Thread(target=self.start_navigation, daemon=True)
         self.detector_thread = threading.Thread(target=self.detector.run, daemon=True)
         self.aim_thread = threading.Thread(target=self.aim_from_detection, daemon=True)
-        self.trigger = TriggerControl()  # or "manual"
 
         self.running = True
+        self.trigger = None  # Delay trigger initialization until after navigation
+        self.keyboard = None
+        self.trigger_ready = threading.Event()  # Event to wait for trigger setup
 
     def start_navigation(self):
         self.navigation = NavigationSystem()
+        self.trigger = TriggerControl()  # Initialize trigger after navigation setup
+        self.keyboard = KeyboardDispatcher(
+            nav_handler=self.navigation.handle_key,
+            trigger_handler=self.trigger.handle_key
+        )
+        self.keyboard.start()
+        self.trigger_ready.set() # Signal that trigger is ready
 
     def aim_from_detection(self):
         """Reads detection data and uses it to control turret aim."""
+        self.trigger_ready.wait()  # Wait until trigger is initialized
         print("[CIWS] Aiming thread started.")
         FIRE_AREA_THRESHOLD = 100_000  # Tune this value (e.g., 320x320 area)
         COOLDOWN_SECONDS = 3 # Cooldown period between shots
@@ -157,7 +171,19 @@ class CIWSControl:
         self.running = False
         self.detector.stop()
         try:
-            self.trigger.cleanup()
+            self.detector.stop()
+        except Exception:
+            pass
+
+        try:
+            if self.trigger:
+                self.trigger.cleanup()
+        except Exception:
+            pass
+
+        try:
+            if self.keyboard:
+                self.keyboard.stop()
         except Exception:
             pass
 

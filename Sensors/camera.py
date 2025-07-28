@@ -209,7 +209,7 @@ class PersonDetector:
                     except Exception as e:
                         print(f"[{self.__class__.__name__}] Error sending 'no detection' signal: {e}")
             scaled_frame = cv2.resize(annotated_frame, (800, 600))  # or (640, 480)
-            cv2.imshow("YOLO Live Feed", scaled_frame)
+            cv2.imshow("YOLO Live Feed", frame)
             cv2.imshow("YOLO Live Feed", annotated_frame)
 
             if cv2.waitKey(1) & 0xFF == ord('q'):
