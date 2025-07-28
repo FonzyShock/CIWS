@@ -34,7 +34,7 @@ from ultralytics import YOLO
 
 # === Person Detection System ===
 class PersonDetectorThread:
-    def __init__(self, model_path="yolo11n.pt", camera_id=0):
+    def __init__(self, model_path="yolov8n.pt", camera_id=0):
         print("[Camera] Initializing YOLO model...")
         self.model = YOLO(model_path)
         self.cap = cv2.VideoCapture(camera_id)
@@ -99,18 +99,16 @@ class PersonDetectorThread:
 class CIWSControl:
     def __init__(self):
         print("[CIWS] Starting up subsystems...")
-
         self.detector = PersonDetectorThread()
-        self.navigation_thread = threading.Thread(target=self.start_navigation, daemon=True)
+        self.navigation_thread = threading.Thread(target=self.init_sys, daemon=True)
         self.detector_thread = threading.Thread(target=self.detector.run, daemon=True)
-        self.aim_thread = threading.Thread(target=self.aim_from_detection, daemon=True)
-
+        self.aim_thread = None
         self.running = True
         self.trigger = None  # Delay trigger initialization until after navigation
         self.keyboard = None
         self.trigger_ready = threading.Event()  # Event to wait for trigger setup
 
-    def start_navigation(self):
+    def init_sys(self):
         self.navigation = NavigationSystem()
         self.trigger = TriggerControl()  # Initialize trigger after navigation setup
         self.keyboard = KeyboardDispatcher(
@@ -119,6 +117,11 @@ class CIWSControl:
         )
         self.keyboard.start()
         self.trigger_ready.set() # Signal that trigger is ready
+
+        # Launch aiming only if in auto mode
+        if self.trigger.mode == "auto":
+            self.aim_thread = threading.Thread(target=self.aim_from_detection, daemon=True)
+            self.aim_thread.start()
 
     def aim_from_detection(self):
         """Reads detection data and uses it to control turret aim."""
@@ -132,7 +135,10 @@ class CIWSControl:
             try:
                 if os.path.exists(self.detector.output_file):
                     with open(self.detector.output_file, 'r') as f:
-                        data = json.load(f)
+                        try:
+                            data = json.load(f)
+                        except json.JSONDecodeError:
+                            data = None
                         if data and isinstance(data, dict):
                             cx = data.get("center_x")
                             cy = data.get("center_y")
@@ -148,7 +154,7 @@ class CIWSControl:
                                 if area >= FIRE_AREA_THRESHOLD and now - last_shot_time >= COOLDOWN_SECONDS:
                                     if getattr(self.trigger, 'mode', 'auto') == 'auto':
                                         print(f"[CIWS] Auto-firing at target (area={area}).")
-                                        self.trigger.shoot()
+                                        self.trigger.shoot_auto()
                                         last_shot_time = now
 
 
@@ -160,7 +166,6 @@ class CIWSControl:
         print("[CIWS] Launching subsystems...")
         self.navigation_thread.start()
         self.detector_thread.start()
-        self.aim_thread.start()
 
         try:
             while self.running:

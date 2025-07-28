@@ -23,17 +23,6 @@ ANGLE_STEP = 5
 def clamp(x, lo=0, hi=180):
     return max(lo, min(hi, x))
 
-def get_char(timeout=0.1):
-    """Non-blocking single-key reader for manual input."""
-    fd = sys.stdin.fileno()
-    old = termios.tcgetattr(fd)
-    try:
-        tty.setraw(fd)
-        rlist, _, _ = select.select([fd], [], [], timeout)
-        return sys.stdin.read(1) if rlist else ''
-    finally:
-        termios.tcsetattr(fd, termios.TCSADRAIN, old)
-
 class TriggerControl:
     def __init__(self, mode=None):
         """Initialize servo control; mode can be 'auto' or 'manual'."""
@@ -69,44 +58,40 @@ class TriggerControl:
         self.servo_x.angle = self.angle_x
         self.servo_z.angle = self.angle_z
 
-        if self.mode == "manual":
-            self._manual_thread = threading.Thread(target=self._manual_control, daemon=True)
-            self._manual_thread.start()
 
     def aim(self, center_x, center_y):
         """For auto mode only — convert pixel coordinates to servo angles."""
         if self.mode != "auto":
             return
         with self._lock:
-            self.angle_x = clamp(int((center_x / 640.0) * 180))
-            self.angle_z = clamp(int((center_y / 480.0) * 180))
+            self.angle_x = clamp(int((center_x / 1920.0) * 180))
+            self.angle_z = clamp(int((center_y / 1080.0) * 180))
             self.servo_x.angle = self.angle_x
             self.servo_z.angle = self.angle_z
             print(f"[Trigger] Auto-aiming to X={self.angle_x}, Z={self.angle_z}")
 
-    def shoot(self):
+    def shoot_auto(self):
+        print("[Trigger] Auto Firing!")
         with self._lock:
-            print("[Trigger] Firing!")
             self.servo_TRIGGER.angle = TRIGGER_FIRE_ANGLE
-            time.sleep(1)
+        time.sleep(1)
+        with self._lock:
             self.servo_TRIGGER.angle = TRIGGER_RETRACT_ANGLE
-            time.sleep(1)
-            print("[Trigger] Trigger reset.")
+        time.sleep(1)
+        print("[Trigger] Auto Trigger reset.")
 
-    def _manual_control(self):
-        print("Manual controls: i=up, k=down, j=left, l=right, space=fire, q=quit")
-        try:
-            while self.running:
-                ch = get_char()
-                self.handle_key(ch)
-                time.sleep(0.05)
-        except Exception as e:
-            print(f"[Trigger] Manual thread error: {e}")
-            self.running = False
+    def shoot_manual(self):
+        print("[Trigger] Manual Firing!")
+        self.servo_TRIGGER.angle = TRIGGER_FIRE_ANGLE
+        time.sleep(1)
+        self.servo_TRIGGER.angle = TRIGGER_RETRACT_ANGLE
+        time.sleep(1)
+        print("[Trigger] Manual Trigger reset.")
 
     def handle_key(self, key):
         if self.mode != "manual":
             return
+        print(f"[Keyboard] Trigger key: {repr(key)}")  # Debug: confirm dispatcher input
         with self._lock:
             if key == 'i':
                 self.angle_z = clamp(self.angle_z - ANGLE_STEP)
@@ -116,36 +101,12 @@ class TriggerControl:
                 self.angle_x = clamp(self.angle_x - ANGLE_STEP)
             elif key == 'l':
                 self.angle_x = clamp(self.angle_x + ANGLE_STEP)
-            elif key == ' ':
-                self.shoot()
+            elif key in 'f':
+                self.shoot_manual()
             elif key == 'q':
                 self.running = False
             self.servo_x.angle = self.angle_x
             self.servo_z.angle = self.angle_z
-    # def _manual_control(self):
-    #     print("Manual controls: i=up, k=down, j=left, l=right, space=fire, q=quit")
-    #     try:
-    #         while self.running:
-    #             ch = get_char()
-    #             with self._lock:
-    #                 if ch == 'i':
-    #                     self.angle_z = clamp(self.angle_z - ANGLE_STEP)
-    #                 elif ch == 'k':
-    #                     self.angle_z = clamp(self.angle_z + ANGLE_STEP)
-    #                 elif ch == 'j':
-    #                     self.angle_x = clamp(self.angle_x - ANGLE_STEP)
-    #                 elif ch == 'l':
-    #                     self.angle_x = clamp(self.angle_x + ANGLE_STEP)
-    #                 elif ch == ' ':
-    #                     self.shoot()
-    #                 elif ch == 'q':
-    #                     self.running = False
-    #             self.servo_x.angle = self.angle_x
-    #             self.servo_z.angle = self.angle_z
-    #             time.sleep(0.05)
-    #     except Exception as e:
-    #         print(f"[Trigger] Manual thread error: {e}")
-    #         self.running = False
 
     def cleanup(self):
         self.running = False
@@ -156,11 +117,23 @@ class TriggerControl:
 
 # === Test Mode ===
 if __name__ == "__main__":
+    from KeyboardDispatcher import KeyboardDispatcher
+
     trig = TriggerControl(mode="manual")
+
+
+    def trig_handler(key):
+        trig.handle_key(key)
+
+
+    kb = KeyboardDispatcher(trigger_handler=trig_handler)
+    kb.start()
+
     try:
-        while trig.running:
-            time.sleep(0.1)
+        while trig.running and kb.running:
+            time.sleep(0.01)
     except KeyboardInterrupt:
         print("Interrupted.")
     finally:
+        kb.stop()
         trig.cleanup()

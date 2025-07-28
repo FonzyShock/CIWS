@@ -319,31 +319,6 @@ class NavigationSystem:
             self.motor.backward()
         else:
             self.motor.stop()
-    # def run_manual(self):
-    #     print("\nEntering manual mode.")
-    #     print("Press keys to drive:")
-    #     print("  w=forward, s=backward, a=left, d=right, q=quit")
-    #     try:
-    #         while True:
-    #             ch = None
-    #             if select.select([sys.stdin], [], [], 0.1)[0]:
-    #                 ch = sys.stdin.read(1)
-    #             if ch == 'w':
-    #                 self.motor.forward()
-    #             elif ch == 'a':
-    #                 self.motor.turn_left()
-    #             elif ch == 'd':
-    #                 self.motor.turn_right()
-    #             elif ch == 's':
-    #                 self.motor.backward()
-    #             elif ch == 'q':
-    #                 break
-    #             else:
-    #                 self.motor.stop()
-    #     finally:
-    #         termios.tcsetattr(sys.stdin, termios.TCSADRAIN, self.old_settings)
-    #         self.motor.stop()
-    #         print("Exiting manual mode.")
 
     def shutdown(self):
         """Stop motors & LiDAR, then exit."""

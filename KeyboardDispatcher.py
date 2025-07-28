@@ -7,7 +7,7 @@ import tty
 import threading
 import select
 
-class KeyboardDispatcher:
+class KeyboardDispatcher(threading.Thread):
     """
     A threaded keyboard listener that sends keystrokes to navigation and turret control subsystems.
     Supports simultaneous manual drive and turret aiming via unified key handler.
@@ -32,11 +32,11 @@ class KeyboardDispatcher:
                     ch = sys.stdin.read(1)
 
                     # Dispatch to navigation if it's a drive key
-                    if ch in ('w', 'a', 's', 'd', 'q') and self.nav_handler:
+                    if ch in ('w', 'a', 's', 'd') and self.nav_handler:
                         self.nav_handler(ch)
 
                     # Dispatch to trigger if it's a turret key
-                    elif ch in ('i', 'j', 'k', 'l', ' ', '\r', 'q') and self.trigger_handler:
+                    elif ch in ('i', 'j', 'k', 'l', 'f') and self.trigger_handler:
                         self.trigger_handler(ch)
 
                     # Exit command
