@@ -1,0 +1,13 @@
+{
+    "speeds": {
+        "slow":   { "forward": 30, "turn": 30, "backward": 30 },
+        "normal": { "forward": 50, "turn": 45, "backward": 40 },
+        "fast":   { "forward": 100, "turn": 75, "backward": 75 }
+    },
+    "thresholds": {
+        "turn_mm": 500,
+        "reverse_mm": 200
+    },
+    "front_sector_degrees": 30,
+    "scan_hz": 10
+}

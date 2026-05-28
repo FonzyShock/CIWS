@@ -10,14 +10,16 @@ import sys
 import termios
 import tty
 import select
+from digitalio import DigitalInOut, Direction, Pull
 
 # --- Servo Config ---
 SERVO_X_PIN    = board.D17
 SERVO_Z_PIN    = board.D18
-SERVO_TRIGGER_PIN = board.D24
 
-TRIGGER_FIRE_ANGLE    = 180
-TRIGGER_RETRACT_ANGLE = 0
+TRIGGER_OUT_PIN      = board.D24     # Pin that drives the relay input
+TRIGGER_ACTIVE_HIGH  = True          # Set False if your relay is active-low
+TRIGGER_PULSE_SEC    = 0.5         # Pulse duration for a "shot"
+
 ANGLE_STEP = 5
 
 def clamp(x, lo=0, hi=180):
@@ -47,17 +49,22 @@ class TriggerControl:
         # Hardware init
         self.pwm_x = pwmio.PWMOut(SERVO_X_PIN, frequency=50)
         self.pwm_z = pwmio.PWMOut(SERVO_Z_PIN, frequency=50)
-        self.pwm_TRIGGER = pwmio.PWMOut(SERVO_TRIGGER_PIN, frequency=50)
+
 
         self.servo_x = servo.Servo(self.pwm_x)
         self.servo_z = servo.Servo(self.pwm_z)
-        self.servo_TRIGGER = servo.Servo(self.pwm_TRIGGER)
+
 
         self.angle_x = 90
         self.angle_z = 90
         self.servo_x.angle = self.angle_x
         self.servo_z.angle = self.angle_z
 
+        # Trigger init
+        self.trigger_out = DigitalInOut(TRIGGER_OUT_PIN)
+        self.trigger_out.direction = Direction.OUTPUT
+        # Ensure safe idle (not firing)
+        self._trigger_set(active=False)
 
     def aim(self, center_x, center_y):
         """For auto mode only — convert pixel coordinates to servo angles."""
@@ -79,22 +86,26 @@ class TriggerControl:
             self.servo_z.angle = self.angle_z
             print("[Trigger] Servos reset to center.")
 
+    def _trigger_set(self, active: bool):
+        """Set the trigger line active/inactive respecting polarity."""
+        # Active means drive the relay input to its asserted level
+        level = TRIGGER_ACTIVE_HIGH if active else not TRIGGER_ACTIVE_HIGH
+        self.trigger_out.value = level
+
+    def pulse_trigger(self, duration: float = TRIGGER_PULSE_SEC):
+        """Generate a clean pulse to fire once."""
+        print(f"[Trigger] Pulse for {duration:.3f}s")
+        self._trigger_set(True)
+        time.sleep(duration)
+        self._trigger_set(False)
     def shoot_auto(self):
         print("[Trigger] Auto Firing!")
-        with self._lock:
-            self.servo_TRIGGER.angle = TRIGGER_FIRE_ANGLE
-        time.sleep(1)
-        with self._lock:
-            self.servo_TRIGGER.angle = TRIGGER_RETRACT_ANGLE
-        time.sleep(1)
+        self.pulse_trigger()
         print("[Trigger] Auto Trigger reset.")
 
     def shoot_manual(self):
         print("[Trigger] Manual Firing!")
-        self.servo_TRIGGER.angle = TRIGGER_FIRE_ANGLE
-        time.sleep(1)
-        self.servo_TRIGGER.angle = TRIGGER_RETRACT_ANGLE
-        time.sleep(1)
+        self.pulse_trigger()
         print("[Trigger] Manual Trigger reset.")
 
     def handle_key(self, key):
@@ -111,17 +122,31 @@ class TriggerControl:
             elif key == 'l':
                 self.angle_x = clamp(self.angle_x + ANGLE_STEP)
             elif key in 'f':
-                self.shoot_manual()
+                pass
             elif key == 'q':
                 self.running = False
             self.servo_x.angle = self.angle_x
             self.servo_z.angle = self.angle_z
 
+            if key == 'f':
+                self.shoot_manual()
+
     def cleanup(self):
         self.running = False
-        self.pwm_x.deinit()
-        self.pwm_z.deinit()
-        self.pwm_TRIGGER.deinit()
+        try:
+            self._trigger_set(False)
+        except Exception:
+            pass
+        # Deinit hardware
+        try:
+            self.pwm_x.deinit()
+            self.pwm_z.deinit()
+        except Exception:
+            pass
+        try:
+            self.trigger_out.deinit()
+        except Exception:
+            pass
         print("[Trigger] Cleanup complete.")
 
 # === Test Mode ===

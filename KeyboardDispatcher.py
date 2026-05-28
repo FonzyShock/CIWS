@@ -13,10 +13,11 @@ class KeyboardDispatcher(threading.Thread):
     Supports simultaneous manual drive and turret aiming via unified key handler.
     """
 
-    def __init__(self, nav_handler=None, trigger_handler=None):
+    def __init__(self, nav_handler=None, trigger_handler=None, quit_handler=None):
         super().__init__(daemon=True)
-        self.nav_handler = nav_handler  # function to call for navigation keys (e.g., w/a/s/d)
-        self.trigger_handler = trigger_handler  # function to call for aiming/firing keys (e.g., i/j/k/l/space)
+        self.nav_handler = nav_handler
+        self.trigger_handler = trigger_handler
+        self.quit_handler = quit_handler
         self.running = True
 
     def stop(self):
@@ -40,8 +41,11 @@ class KeyboardDispatcher(threading.Thread):
                         self.trigger_handler(ch)
 
                     # Exit command
+                    # Exit command — trigger full system shutdown
                     if ch == 'q':
-                        print("[Keyboard] 'q' pressed — exiting control mode.")
+                        print("[Keyboard] 'q' pressed — shutting down CIWS.")
                         self.stop()
+                        if self.quit_handler:
+                            self.quit_handler()
         finally:
             termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
